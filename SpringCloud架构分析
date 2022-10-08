@@ -1,0 +1,41 @@
+# Spring Cloud 架构分析
+
+## 网关
+
+## 注册中心
+
+## 配置中心
+
+## 断路器
+
+## farmer 的架构
+- 注册中心: Eruka
+- 网关服务：Zuul
+    - 跨域配置
+        - 设置相关头信息
+    - 配置Https证书
+    - 网关限流1
+        - 
+    - 认证鉴权
+    - CSRF
+    - jwtToken 签发与验签方式，验签security 加盐验签
+        - 头部 + 信息主体部 + 签名部分
+        - jwttoken 验签通过即可放行, 盐值在服务器端存储
+    - UsernamePasswordAuthenticationToken 最终都转化为了用户名和密码，然后isAuthenticated 设置为True 验证方式
+    - Spring Security OAuth2  
+        - authenticationManager 定义Dao Authentication provider + userDetailService 认证过程
+        - token 自定义 TokenService
+        - authentication 过程自定义 Authentication filter 然后isAuthenticated 设置为true.
+    - 登录流程：
+        - 输入手机号及验证码 ==> 验证验证码 ==> 通过手机号查询用户信息 ==> 构建UsernamePasswordAuthenticationToken 进行验证 ==> 验证成功 ==> 生成JwtToken并保存进redis ==> 写Token 相关信息进Cookie 并返回
+    - 带Token 鉴权流程:
+        - 配置JwtAuthenticationFilter拦截请求 ==> Open接口相关的放行，然后校验JwtToken进行验签 ==> 验签成功继续验证Token 是否在Redis，是否过期 ==> 成功则设置isAuthenticated 为true 放行
+- 配置中心: Config 
+- 服务间调用: Feign Client
+- Apollo： 配置中心 
+- Admin: 服务监控
+- 业务服务: 支付服务 
+- 业务服务: 商品、库存
+- 业务服务: 秒杀
+## pigx 的架构
+
