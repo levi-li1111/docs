@@ -3,9 +3,10 @@
 - 异步同步模式
 - 半同步模式 -- 解决主从数据的一致性的问题，但又是时间会比较长
 - GTID同步模式
-### Redo Log -- InnoDB 引擎特有的日志 -- 提供crash-safe 的能力 物理日志 循环写 prepare commit 两阶段提交
+### redo Log -- InnoDB 引擎特有的日志 -- 提供crash-safe 的能力 物理日志 循环写 prepare commit 两阶段提交
 - Server 层 + 存储层
 ### bin log -- server 层 逻辑日志 -- 追加写
+- Write-Ahead Logging WAL 机制
 
 ### mysql 运维语句总结
 - 事务查询语句
@@ -41,3 +42,142 @@ select * from information_schema.innodb_trx where TIME_TO_SEC(timediff(now(),trx
 - select 语句如果加锁，也是当前读
 - 读锁（S锁 共享锁） 
 - 写锁 (X锁，排他锁)
+- 普通索引VS 唯一索引: 更新时性能可能会有差异
+- INNODB 按照数据页来读取
+- change buffer -- 内存拷贝 + 写磁盘
+- change buffer 操作应用到原数据页面 - merge, 访问数据页会先merge, 后台线程也会定期merge
+- 读数据 buffer pool
+- 唯一索引的更新因为需要检查唯一性约束，需要读入内存，不能使用change buffer
+- innodb_change_buffer_max_size 设置change buffer 占buffer pool 的大小
+- 写多读少的情况change buffer的使用效果做好，-- 账单类 日志类，
+- redo log主要节省的是随机写磁盘的IO消耗 而change buffer 主要节省的则是随机读磁盘的IO消耗
+- show index from [table name]
+- 索引上不同值的个数: Cardinality --采样统计
+- analyze table t;
+- mysql 选错索引: force index
+- 当内存数据页跟磁盘数据页内容不一致的时候，我们称这个内存页为“脏页”。内存数据写入到磁盘后，内存和磁盘上的数据页的内容就一致了，称为“干净页”。
+- innodb_io_capacity
+-  fio -filename=$filename -direct=1 -iodepth 1 -thread -rw=randrw -ioengine=psync -bs=16k -size=500M -numjobs=10 -runtime=10 -group_reporting -name=mytest
+- innodb_flush_neighbors  0  
+- sort_buffer 用于排序的内存
+- sort_buffer_size
+- number_of_tmp_files 归并排序算法 12份
+- rowid 排序优化
+- 如果内存够 就要多利用内存，尽量减少磁盘访问
+- 索引方式解决order by 不需要filesort 情况
+- Using temporary 使用临时表
+- Using filesort 排序
+- order by rand()使用了内存临时表，内存临时表排序的时候使用了rowid排序方法
+- tmp_table_size 内存临时表大小 超过之后会转成磁盘临时表
+- 尽量把业务逻辑写在业务代码中，让数据库只做读写数据的事情
+- 如果对字段做了函数计算，就用不上索引了，这是MySQL的规定 ？？ 
+    -  对索引字段做函数操作，可能会破坏索引值的有序性，因此优化器就决定放弃走树搜索功能
+- Extra Using index: 使用了覆盖索引
+- 索引快速定位  VS 全索引扫描
+- 隐式类型转换导致不能走索引
+- 隐式字符编码转换
+- 小表驱动大表  驱动表与被驱动表
+- MDL 
+- show processlist
+- sys.schema_table_lock_waits 
+- 表锁的几种情况-- 查询数据很慢的情况
+    - 等MDL锁
+    - flush 表
+    - 等行锁
+- select * from t sys.innodb_lock_waits where locked_table='xxx';
+- undo_log 回滚日志
+
+- 日志系统
+    - WAL
+- 索引机制
+    - 索引数据结构: B+Tree 快速树搜索
+    - 聚簇索引
+    - 普通索引 VS 唯一索引
+    - 覆盖索引
+    - 回表操作
+    - 索引下推优化
+    - 数据页机制
+- 事务隔离级别
+    - MVCC
+    - 当前读
+    - 快照读
+- 锁机制
+    - 乐观锁 
+    - 悲观锁 select xxx for update
+    - 全局锁:对整个数据库实例加锁：全局读锁 数据库只读状态 
+        - 应用场景：全库逻辑备份 Flush tables with read lock (FTWRL)
+    - 表级锁
+        - 表锁
+        - 元数据锁 MDL
+        - 增删改查数据都会先申请 MDL 读锁 事务提交后释放
+        - 修改表数据结构会加MDL 写锁
+        - MDL读锁共享 读写锁互斥 写锁互斥
+        - 安全的给小表加字段: ALTER table tbl_name WAIT N add column
+    - 行锁: 引擎级别
+        - MyISAM 不支持行锁
+        - INNODB 支持行锁
+        - 两阶段锁： 在InnoDB 事务中，行锁是在需要的时候才加上的，但并不是不需要了就立刻释放，而是要等事务结束时才释放，这就是两阶段锁协议。
+        - 如果你的事务中需要锁多个行，要把最可能造成锁冲突、最可能影响并发度的锁尽量往后放。
+        - lock in share mode - 读锁  读写锁是互斥的
+        - 非索引列 select for update 会锁住全表
+    - 间隙锁 Gap Lock - 解决幻读问题 新增的记录没法加锁 记录两边的间隙也加锁了 = 记录数 + 1  只在RR下存在 生效
+        - 跟行锁有冲突关系的是“另外一个行锁”。但是间隙锁不一样，跟间隙锁存在冲突关系的，是“往这个间隙中插入一个记录”这个操作。
+    - next-key lock  前开后闭区间
+
+- 内存读写优先于磁盘读写
+    - buffer pool
+    - change buffer
+    - order by 联合索引 覆盖索引 内存排序 文件排序，内存 磁盘
+    - sort buffer 
+- group by 语句
+- Index Nested-Loop Join NJL  类似嵌套查询
+- straight_join 左边驱动右表 只适用于 INNER JOIN 的情况
+- 使用Join时需要让小表驱动达标　可能会使用被驱动表的索引为前提
+- simple nested-loop join 
+- Block Neste-Loop join BNL - join_buffer_size
+- 所以，更准确地说，在决定哪个表做驱动表的时候，应该是两个表按照各自的条件过滤，过滤完成之后，计算参与join的各个字段的总数据量，数据量小的那个表，就是“小表”，应该作为驱动表。
+- 主从复制
+- 读写分离
+- 分表分库
+- show engine innodb status: LATESTDETECTED DEADLOCK
+- explain 结果解读
+    - id:
+    - select_type：
+        - SIMPLE: Simple SELECT (not using UNION or subqueries)
+        - Primary: Outermost SELECT
+        - UNION: Second or later SELECT statement in a UNION
+        - UNION RESULT: Result of a UNION
+        - SUBQUERY: First SELECT in subquery
+        - DEPENDENT SUBQUERY: First SELECT in subquery, dependent on outer query
+        - MATERIALIZED Materialized subquery
+    - table: 
+    - partitions:
+    - type:
+        - All:
+        - range：索引范围查询
+        - ref: 二级索引等值查询
+        - const: 主键/唯一索引等值查询
+        - index_merge: 多个索引查询
+        - index: 覆盖索引且需要扫描全部的索引
+        - eq_ref: 被连接表主键/唯一索引等值查询
+    - possible_keys: 可能用到的索引
+    - key: 实际用到的索引
+    - key_len: 实际使用索引的最大长度
+    - ref: 
+        - 等值查询有一个常数/列值
+        - const - 索引等值查询；
+        - 被驱动表索引列等值查询
+    - rows: 预估的需要读取的记录条数
+    - filtered: 某个表经过搜索条件过滤后剩余记录条数的百分比
+    - Extra:
+        - Imppssible WHERE - where false;
+        - Using index - 覆盖索引
+        - Using index condition - 索引下推
+        - Using where - 顺序扫描 where 条件查询
+        - **Using temporary 使用临时表
+        - **Using filesort 排序
+        - Using index for group by
+        - Using join buffer (Block Nested Loop), Using join buffer (Batched Key Access), Using join buffer (hash join) 
+        - 子查询物化
+        - 不相关子查询 VS 相关子查询
+        
